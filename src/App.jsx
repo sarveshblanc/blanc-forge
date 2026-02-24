@@ -7,7 +7,7 @@ async function callClaude(systemPrompt, userMessage, tools) {
     try {
       const body = {
         model: "claude-sonnet-4-20250514",
-        max_tokens: 4096,
+        max_tokens: 1024,
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }]
       };
