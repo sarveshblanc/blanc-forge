@@ -255,52 +255,45 @@ async function runPipeline(input, isQuick, toneValue, onStage, onResult) {
   let ctx = {};
   const ti = toneInstruction(toneValue);
   ctx._tone = toneValue;
-
   onStage("audit", "Scanning brand presence...");
   if (isQuick) {
     const disc = await discoverBrand(input, PROMPTS.quickDiscovery + ti);
     if (disc.error) { onResult({ error: disc.error }); return; }
     ctx.discovery = disc;
   } else { ctx.discovery = input; }
-
   onStage("competitive", "Mapping competitive landscape...");
-  // Use web search to enrich competitive data for both modes
   const compName = ctx.discovery?.companyName || ctx.discovery?.companyDescription || "";
   const compIndustry = ctx.discovery?.industry || "";
   if (compName && compIndustry) {
     const compResearch = await callClaude(
-      `You are a competitive intelligence researcher. Search the web for competitors of this company and their market positioning. Return a brief competitive landscape summary.`,
-      `Research competitors of ${compName} in the ${compIndustry} space. Find their main competitors, how they position themselves, and what differentiates each.`,
+      `You are a competitive intelligence researcher. Search the web for competitors and return a brief 2-3 sentence competitive landscape summary.`,
+      `Research top 3 competitors of ${compName} in ${compIndustry} and how they position themselves.`,
       [{ type: "web_search_20250305", name: "web_search" }]
     );
     const compText = compResearch?.raw || JSON.stringify(compResearch);
-    // Enrich discovery with real competitive data
-    ctx.discovery = { ...ctx.discovery, competitiveResearch: compText };
+    ctx.discovery = { ...ctx.discovery, competitiveResearch: compText.slice(0, 500) };
   }
-
+  // Slim discovery object for downstream calls
+  const d = ctx.discovery;
+  const discSlim = { companyName: d.companyName, industry: d.industry, targetAudience: d.targetAudience, coreValue: d.coreValue, differentiator: d.differentiator, competitiveResearch: d.competitiveResearch };
   onStage("positioning", "Generating positioning territories...");
-  ctx.positioning = await callClaude(PROMPTS.positioning + ti, `Brand Discovery:\n${JSON.stringify(ctx.discovery, null, 2)}\n\nGenerate 3 positioning territories.`);
-
-  onStage("personality", "Defining brand personality & voice...");
+  ctx.positioning = await callClaude(PROMPTS.positioning + ti, `Brand Discovery:\n${JSON.stringify(discSlim, null, 2)}\n\nGenerate 3 positioning territories.`);
   const territory = ctx.positioning?.territories?.[0] || ctx.positioning;
-  ctx.personality = await callClaude(PROMPTS.personality + ti, `Brand:\n${JSON.stringify(ctx.discovery, null, 2)}\n\nPositioning:\n${JSON.stringify(territory, null, 2)}\n\nDefine personality and voice.`);
-
+  const terSlim = { name: territory.name, coreIdea: territory.coreIdea, valueProp: territory.valueProp };
+  onStage("personality", "Defining brand personality & voice...");
+  ctx.personality = await callClaude(PROMPTS.personality + ti, `Brand:\n${JSON.stringify(discSlim, null, 2)}\n\nPositioning:\n${JSON.stringify(terSlim, null, 2)}\n\nDefine personality and voice.`);
+  const persSlim = { archetype: ctx.personality?.archetype, personalityTraits: ctx.personality?.personalityTraits?.slice(0,3) };
   onStage("messaging", "Crafting messaging architecture...");
-  ctx.messaging = await callClaude(PROMPTS.messaging + ti, `Brand:\n${JSON.stringify(ctx.discovery, null, 2)}\n\nPositioning:\n${JSON.stringify(territory, null, 2)}\n\nPersonality:\n${JSON.stringify(ctx.personality, null, 2)}\n\nCreate messaging architecture.`);
-
+  ctx.messaging = await callClaude(PROMPTS.messaging + ti, `Brand:\n${JSON.stringify(discSlim, null, 2)}\n\nPositioning:\n${JSON.stringify(terSlim, null, 2)}\n\nPersonality:\n${JSON.stringify(persSlim, null, 2)}\n\nCreate messaging architecture.`);
+  const msgSlim = { primaryClaim: ctx.messaging?.messageHierarchy?.primaryClaim, elevatorPitches: ctx.messaging?.elevatorPitches };
   onStage("verbal", "Building verbal identity...");
-  ctx.verbal = await callClaude(PROMPTS.verbalIdentity + ti, `Discovery:\n${JSON.stringify(ctx.discovery, null, 2)}\n\nPositioning:\n${JSON.stringify(territory, null, 2)}\n\nPersonality:\n${JSON.stringify(ctx.personality, null, 2)}\n\nMessaging:\n${JSON.stringify(ctx.messaging, null, 2)}\n\nCreate verbal identity.`);
-
+  ctx.verbal = await callClaude(PROMPTS.verbalIdentity + ti, `Brand: ${discSlim.companyName}, ${discSlim.industry}\nPositioning: ${terSlim.coreIdea}\nPersonality: ${persSlim.archetype}\nPrimary claim: ${msgSlim.primaryClaim}\n\nCreate verbal identity.`);
   onStage("visual", "Generating visual identity...");
-  ctx.visual = await callClaude(PROMPTS.visualIdentity + ti, `Discovery:\n${JSON.stringify(ctx.discovery, null, 2)}\n\nPositioning:\n${JSON.stringify(territory, null, 2)}\n\nPersonality:\n${JSON.stringify(ctx.personality, null, 2)}\n\nVisual prefs: ${JSON.stringify(ctx.discovery?.visualPreferences || [])}\n\nDefine visual identity.`);
-
+  ctx.visual = await callClaude(PROMPTS.visualIdentity + ti, `Brand: ${discSlim.companyName}, ${discSlim.industry}\nPositioning: ${terSlim.coreIdea}\nPersonality: ${persSlim.archetype}\nVisual prefs: ${JSON.stringify(d.visualPreferences || [])}\n\nDefine visual identity.`);
   onStage("guidelines", "Compiling...");
   await new Promise(r => setTimeout(r, 400));
   onResult(ctx);
 }
-
-// ─── Section Regeneration ────────────────────────────────────
-
 async function regenerateSection(sectionId, context, instructions) {
   const { discovery, positioning, personality, messaging, verbal, visual } = context;
   const territory = positioning?.territories?.[0] || positioning;
