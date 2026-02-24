@@ -13,7 +13,7 @@ async function callClaude(systemPrompt, userMessage, tools) {
       };
       if (tools) body.tools = tools;
 
-      const res = await fetch("/api/claude", {   // ← changed URL
+      const res = await fetch("https://blanc-forge.sarveshblanc1.workers.dev", {   // ← changed URL
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
